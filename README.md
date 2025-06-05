@@ -8,8 +8,8 @@ This is a blank WordPress theme specifically designed to be used in conjunction 
 - **REST API Enabled**: Ensures the WordPress REST API is fully functional for content consumption.
 - **Custom Login Page Styling**: Includes custom styling for the WordPress login page to match a modern aesthetic.
 - **Frontend Redirection**: Automatically redirects frontend requests to the WordPress admin area or login page, as the theme is not intended for public-facing display.
-- **API Usage Analytics**: Track which endpoints are being used most frequently with detailed usage statistics.
-- **Performance Monitoring**: Built-in performance metrics for API responses including response time, memory usage, and query counts.
+- **API Usage Analytics**: Track API endpoint usage, request methods, response times, status codes, user agents, and IP addresses.
+- **Performance Monitoring**: Built-in performance metrics for API responses including response time, memory usage, peak memory, and database query counts.
 - **Error Logging**: Comprehensive error logging for API issues with detailed error tracking and debugging information.
 
 ## Installation
@@ -38,8 +38,8 @@ Access the API monitoring dashboard from your WordPress admin panel:
 
 The theme automatically tracks:
 
-- Most frequently used API endpoints
-- Request methods and response times
+- Total requests, unique endpoints, average response time, and success rate.
+- Most frequently used API endpoints, including request methods, response times, status codes, user agents, and IP addresses.
 
 ### Error Logging
 

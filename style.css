@@ -415,3 +415,137 @@ body.login {
     padding: 6px 10px;
     margin-right: 10px;
 }
+
+/* Dashboard related css */
+.content-overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.content-stat-item {
+    background: #f9f9f9;
+    padding: 15px;
+    text-decoration: none;
+    border-radius: 5px;
+    border-left: 4px solid #0073aa;
+}
+
+.content-stat-item:hover {
+    background: #f1f1f1;
+}
+
+.stat-numbers {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.stat-numbers span {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 3px;
+}
+
+.published {
+    background: #d4edda;
+    color: #155724;
+}
+
+.draft {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.recent-activity-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.activity-item {
+    display: block;
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.2s;
+}
+
+.activity-item:hover {
+    background: #f7f7f7;
+}
+
+.activity-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 5px;
+}
+
+.post-type-badge {
+    font-size: 11px;
+    background: #0073aa;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.activity-meta {
+    font-size: 12px;
+    color: #666;
+    display: flex;
+    gap: 15px;
+}
+
+.status-publish {
+    color: #155724;
+}
+
+.status-draft {
+    color: #856404;
+}
+
+.status-pending {
+    color: #721c24;
+}
+
+.quick-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+}
+
+.quick-action-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 10px;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    text-decoration: none;
+    color: #333;
+    transition: all 0.2s;
+}
+
+.quick-action-btn:hover {
+    background: #0073aa;
+    color: white;
+    text-decoration: none;
+}
+
+.quick-action-btn .dashicons {
+    font-size: 24px;
+    margin-bottom: 8px;
+}
+
+.system-status-grid {
+    display: grid;
+    gap: 10px;
+}
+
+.status-item {
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+}

@@ -365,7 +365,248 @@ class Headless_API_Error_Logger
     }
 }
 
-// Initialize classes
+
+// Remove default dashboard widgets
+function remove_default_dashboard_widgets()
+{
+    remove_meta_box('dashboard_right_now', 'dashboard', 'normal');
+    remove_meta_box('dashboard_recent_comments', 'dashboard', 'normal');
+    remove_meta_box('dashboard_incoming_links', 'dashboard', 'normal');
+    remove_meta_box('dashboard_plugins', 'dashboard', 'normal');
+    remove_meta_box('dashboard_quick_press', 'dashboard', 'side');
+    remove_meta_box('dashboard_recent_drafts', 'dashboard', 'side');
+    remove_meta_box('dashboard_primary', 'dashboard', 'side');
+    remove_meta_box('dashboard_secondary', 'dashboard', 'side');
+    remove_meta_box('dashboard_activity', 'dashboard', 'normal');
+
+    remove_action('welcome_panel', 'wp_welcome_panel');
+}
+add_action('wp_dashboard_setup', 'remove_default_dashboard_widgets');
+function add_content_overview_widget()
+{
+    wp_add_dashboard_widget(
+        'content_overview_widget',
+        'Content Overview',
+        'content_overview_widget_display'
+    );
+}
+
+function content_overview_widget_display()
+{
+    $post_counts = wp_count_posts('post');
+    $page_counts = wp_count_posts('page');
+    $custom_post_types = get_post_types(
+        ['public' => true, '_builtin' => false],
+        'objects'
+    );
+
+    echo '<div class="content-overview-grid">';
+
+    $url = admin_url('edit.php');
+    echo '<a href="' . esc_url($url) . '" class="content-stat-item">';
+    echo '<h4>Posts</h4>';
+    echo '<div class="stat-numbers">';
+    echo '<span class="published">' . $post_counts->publish . ' Published</span>';
+    echo '<span class="draft">'     . $post_counts->draft   . ' Drafts</span>';
+    echo '</div>';
+    echo '</a>';
+
+    $url = admin_url('edit.php?post_type=page');
+    echo '<a href="' . esc_url($url) . '" class="content-stat-item">';
+    echo '<h4>Pages</h4>';
+    echo '<div class="stat-numbers">';
+    echo '<span class="published">' . $page_counts->publish . ' Published</span>';
+    echo '<span class="draft">'     . $page_counts->draft   . ' Drafts</span>';
+    echo '</div>';
+    echo '</a>';
+
+    foreach ($custom_post_types as $pt) {
+        $counts = wp_count_posts($pt->name);
+        $url = admin_url('edit.php?post_type=' . $pt->name);
+        echo '<a href="' . esc_url($url) . '" class="content-stat-item">';
+        echo '<h4>' . esc_html($pt->labels->name) . '</h4>';
+        echo '<div class="stat-numbers">';
+        echo '<span class="published">' . $counts->publish . ' Published</span>';
+        echo '<span class="draft">'     . $counts->draft   . ' Drafts</span>';
+        echo '</div>';
+        echo '</a>';
+    }
+
+    echo '</div>';
+}
+add_action('wp_dashboard_setup', 'add_content_overview_widget');
+
+
+
+function add_recent_activity_widget()
+{
+    wp_add_dashboard_widget(
+        'recent_activity_widget',
+        'Recent Content Activity',
+        'recent_activity_widget_display'
+    );
+}
+
+function recent_activity_widget_display()
+{
+    $recent_posts = get_posts(array(
+        'numberposts' => 10,
+        'post_status'  => array('publish', 'draft', 'pending'),
+        'post_type'    => 'any',
+        'orderby'      => 'modified',
+        'order'        => 'DESC'
+    ));
+
+    echo '<div class="recent-activity-list">';
+    foreach ($recent_posts as $post) {
+        $author    = get_userdata($post->post_author);
+        $time_diff = human_time_diff(
+            strtotime($post->post_modified),
+            current_time('timestamp')
+        ) . ' ago';
+        $edit_link = get_edit_post_link($post->ID);
+
+        echo '<a href="' . esc_url($edit_link) .
+            '" class="activity-item">';
+        echo '<div class="activity-content">';
+        echo '<strong>' . get_the_title($post) . '</strong>';
+        echo '<span class="post-type-badge">' .
+            esc_html(get_post_type_object($post->post_type)
+                ->labels->singular_name) .
+            '</span>';
+        echo '</div>';
+        echo '<div class="activity-meta">';
+        echo '<span class="author">by ' .
+            esc_html($author->display_name) . '</span>';
+        echo '<span class="time">' . esc_html($time_diff) .
+            '</span>';
+        echo '<span class="status status-' .
+            esc_attr($post->post_status) . '">' .
+            ucfirst($post->post_status) . '</span>';
+        echo '</div>';
+        echo '</a>';
+    }
+    echo '</div>';
+}
+add_action('wp_dashboard_setup', 'add_recent_activity_widget');
+function add_quick_actions_widget()
+{
+    wp_add_dashboard_widget(
+        'quick_actions_widget',
+        'Quick Actions',
+        'quick_actions_widget_display'
+    );
+}
+
+function quick_actions_widget_display()
+{
+    echo '<div class="quick-actions-grid">';
+
+    if (current_user_can('edit_posts')) {
+        echo '<a href="' . admin_url('post-new.php') . '" class="quick-action-btn">';
+        echo '<span class="dashicons dashicons-edit"></span>';
+        echo '<span>New Post</span>';
+        echo '</a>';
+    }
+
+    if (current_user_can('edit_pages')) {
+        echo '<a href="' . admin_url('post-new.php?post_type=page') . '" class="quick-action-btn">';
+        echo '<span class="dashicons dashicons-admin-page"></span>';
+        echo '<span>New Page</span>';
+        echo '</a>';
+    }
+
+    if (current_user_can('upload_files')) {
+        echo '<a href="' . admin_url('media-new.php') . '" class="quick-action-btn">';
+        echo '<span class="dashicons dashicons-admin-media"></span>';
+        echo '<span>Upload Media</span>';
+        echo '</a>';
+    }
+
+    if (current_user_can('manage_options')) {
+        echo '<a href="' . admin_url('tools.php?page=api-monitoring') . '" class="quick-action-btn">';
+        echo '<span class="dashicons dashicons-chart-line"></span>';
+        echo '<span>API Analytics</span>';
+        echo '</a>';
+    }
+
+    $custom_post_types = get_post_types(array('public' => true, '_builtin' => false), 'objects');
+    foreach ($custom_post_types as $post_type) {
+        if (current_user_can('edit_posts')) {
+            echo '<a href="' . admin_url('post-new.php?post_type=' . $post_type->name) . '" class="quick-action-btn">';
+            echo '<span class="dashicons dashicons-plus"></span>';
+            echo '<span>New ' . $post_type->labels->singular_name . '</span>';
+            echo '</a>';
+        }
+    }
+
+    echo '</div>';
+}
+add_action('wp_dashboard_setup', 'add_quick_actions_widget');
+function customize_dashboard_by_role()
+{
+    $current_user = wp_get_current_user();
+
+    if (in_array('editor', $current_user->roles)) {
+        remove_meta_box('dashboard_site_health', 'dashboard', 'normal');
+
+        add_action('wp_dashboard_setup', function () {
+            global $wp_meta_boxes;
+
+            $content_widget = $wp_meta_boxes['dashboard']['normal']['core']['content_overview_widget'];
+            unset($wp_meta_boxes['dashboard']['normal']['core']['content_overview_widget']);
+            $wp_meta_boxes['dashboard']['normal']['high']['content_overview_widget'] = $content_widget;
+        }, 999);
+    }
+
+    if (in_array('administrator', $current_user->roles)) {
+        wp_add_dashboard_widget(
+            'system_status_widget',
+            'System Status',
+            'system_status_widget_display'
+        );
+    }
+}
+
+function system_status_widget_display()
+{
+    global $wpdb;
+
+    echo '<div class="system-status-grid">';
+    echo '<div class="status-item">';
+    echo '<strong>Database Size:</strong> ';
+
+    $db_size = $wpdb->get_var("SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 1) AS 'DB Size in MB' FROM information_schema.tables WHERE table_schema='" . DB_NAME . "'");
+    echo $db_size . ' MB';
+    echo '</div>';
+
+    echo '<div class="status-item">';
+    echo '<strong>WordPress Version:</strong> ' . get_bloginfo('version');
+    echo '</div>';
+
+    echo '<div class="status-item">';
+    echo '<strong>PHP Version:</strong> ' . PHP_VERSION;
+    echo '</div>';
+    echo '</div>';
+}
+
+add_action('wp_dashboard_setup', 'customize_dashboard_by_role');
+
+function enqueue_custom_dashboard_styles($hook)
+{
+    if ($hook !== 'index.php') {
+        return;
+    }
+    wp_enqueue_style(
+        'custom-dashboard',
+        get_stylesheet_directory_uri() . '/style.css',
+        array(),
+        '1.0.0'
+    );
+}
+add_action('admin_enqueue_scripts', 'enqueue_custom_dashboard_styles');
+
+
 $analytics_instance = null;
 $performance_instance = null;
 $error_logger_instance = null;
@@ -827,7 +1068,6 @@ function headless_api_monitoring_page()
 <?php
 }
 
-// Login customization functions
 function custom_login_stylesheet()
 {
     wp_enqueue_style('custom-login', get_stylesheet_directory_uri() . '/style.css', array(), '1.0.1');
