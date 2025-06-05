@@ -1,0 +1,417 @@
+/*
+Theme Name: Black WordPress Theme
+Theme URI: https://github.com
+Author: Arindam Biswas
+Author URI: https://arindambiswas.co.in
+Description: Blank WordPress theme for headless application 
+Version: 1.0
+Requires at least: 5.0
+Tested up to: 6.8.1
+Requires PHP: 7.0
+License: GNU General Public License v2 or later
+License URI: http://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: blank-wordpress-theme
+*/
+
+/* Define CSS Custom Properties for consistent theming */
+
+:root {
+    --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --background-gradient: linear-gradient(135deg, #7C69EF 0%, #7C69EF 100%);
+    --primary-color: #667eea;
+    --secondary-color: #764ba2;
+    --text-color: #333;
+    --border-color: #e1e1e1;
+    --error-color: #dc3545;
+    --white: #fff;
+    --box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    --card-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    --input-shadow: 0 0 0 3px rgba(102, 126, 234, 0.25);
+    --button-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    --border-radius-lg: 24px;
+    --border-radius-md: 8px;
+    --border-radius-sm: 4px;
+    --spacing-xs: 8px;
+    --spacing-sm: 15px;
+    --spacing-md: 20px;
+    --spacing-lg: 30px;
+    --spacing-xl: 40px;
+}
+
+/* Reset and Base Styles */
+body.login {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--background-gradient);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-md);
+}
+
+/* Main Login Container */
+#login {
+    background: var(--white);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--card-shadow);
+    max-width: 400px;
+    width: 100%;
+    padding: var(--spacing-xl) var(--spacing-xl);
+    position: relative;
+}
+
+/* Header and Logo Styles */
+.login h1 {
+    margin: 0 0 var(--spacing-xl);
+    text-align: center;
+}
+
+.login h1 a {
+    background: none !important;
+    color: var(--text-color);
+    font-size: 1.75rem !important;
+    font-weight: 600;
+    line-height: 1.3 !important;
+    height: auto !important;
+    width: auto !important;
+    text-decoration: none;
+    text-indent: 0 !important;
+    display: block;
+}
+
+/* Form Container */
+.login form {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    margin: 0;
+    padding: 0;
+}
+
+/* Input Fields */
+.login form .input {
+    background: var(--white);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    font-size: 1rem;
+    margin: var(--spacing-xs) 0 var(--spacing-lg);
+    padding: 0.875rem 1rem;
+    width: 100%;
+    box-sizing: border-box;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.login form .input:focus {
+    border-color: var(--primary-color);
+    box-shadow: var(--input-shadow);
+    outline: none;
+}
+
+/* Form Labels */
+.login label {
+    color: var(--text-color);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    display: block;
+    margin-bottom: var(--spacing-xs);
+}
+
+/* Submit Button */
+.login .submit .button {
+    background: #7C69EF;
+    border: none;
+    border-radius: var(--border-radius-md);
+    color: var(--white);
+    cursor: pointer;
+    display: block;
+    font-size: 1rem;
+    font-weight: 500;
+    line-height: 1.5;
+    margin-top: var(--spacing-lg);
+    padding: 0.875rem;
+    width: 100%;
+    transition: background-color 0.2s ease;
+}
+
+.login .submit .button:hover {
+    background: #6A5AD0;
+}
+
+/* Remember Me Checkbox */
+.login .forgetmenot {
+    margin: var(--spacing-md) 0;
+}
+
+.login .forgetmenot label {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    cursor: pointer;
+    color: #666;
+    font-size: 0.875rem;
+}
+
+.login input[type="checkbox"] {
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    height: 16px;
+    width: 16px;
+    margin: 0;
+    position: relative;
+    top: -1px;
+}
+
+/* Navigation Links */
+.login #nav,
+.login #backtoblog {
+    font-size: 0.875rem;
+    margin: var(--spacing-md) 0 0;
+    padding: 0;
+    text-align: center;
+}
+
+.login #nav a,
+.login #backtoblog a {
+    color: #7C69EF;
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+.login #nav a:hover,
+.login #backtoblog a:hover {
+    color: #6A5AD0;
+}
+
+/* Links Container */
+.login #nav {
+    margin-top: var(--spacing-md);
+}
+
+#backtoblog {
+    margin-top: var(--spacing-xs);
+}
+
+/* Form Field Spacing */
+.login form .user-pass-wrap,
+.login form .user-email-wrap {
+    margin-bottom: var(--spacing-md);
+}
+
+/* Error Messages */
+.login .message,
+.login #login_error {
+    background: #fff;
+    border: 1px solid var(--error-color);
+    border-radius: var(--border-radius-md);
+    color: var(--error-color);
+    font-size: 0.875rem;
+    margin: 0 0 var(--spacing-md);
+    padding: var(--spacing-sm);
+    text-align: center;
+}
+
+.login .message {
+    border-color: #00a32a;
+    color: #00a32a;
+}
+
+/* Fix form field containers */
+.login form p {
+    margin: 0 0 var(--spacing-md);
+}
+
+.login form p:last-child {
+    margin-bottom: 0;
+}
+
+/* Ensure proper input styling */
+.login input[type="text"],
+.login input[type="password"],
+.login input[type="email"] {
+    background: var(--white);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    font-size: 1rem;
+    margin: var(--spacing-xs) 0 0;
+    padding: 0.875rem 1rem;
+    width: 100%;
+    box-sizing: border-box;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.login input[type="text"]:focus,
+.login input[type="password"]:focus,
+.login input[type="email"]:focus {
+    border-color: var(--primary-color);
+    box-shadow: var(--input-shadow);
+    outline: none;
+}
+
+/* Fix submit button container */
+.login .submit {
+    margin: var(--spacing-lg) 0 0;
+    text-align: left;
+}
+
+/* Loading state */
+.login .button.loading {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+/* Fix language switcher if present */
+.login .language-switcher {
+    text-align: center;
+    margin-top: var(--spacing-md);
+}
+
+/* Interim login styles */
+.interim-login #login {
+    padding: var(--spacing-md);
+}
+
+.interim-login .login h1 {
+    margin-bottom: var(--spacing-md);
+}
+
+/* Privacy policy link */
+.login .privacy-policy-page-link {
+    text-align: center;
+    margin-top: var(--spacing-sm);
+}
+
+.login .privacy-policy-page-link a {
+    color: #7C69EF;
+    font-size: 0.875rem;
+    text-decoration: none;
+}
+
+/* Fix any WordPress core overrides */
+.login form .input,
+.login input[type="text"],
+.login input[type="password"],
+.login input[type="email"] {
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+/* Ensure proper spacing for all form elements */
+.login form>p {
+    margin-bottom: var(--spacing-md);
+}
+
+.login form>p:last-of-type {
+    margin-bottom: 0;
+}
+
+/* Media Queries */
+@media (max-width: 480px) {
+    #login {
+        padding: var(--spacing-lg) var(--spacing-md);
+        margin: var(--spacing-sm);
+    }
+
+    .login h1 a {
+        font-size: 1.5rem !important;
+    }
+
+    .login form .input,
+    .login input[type="text"],
+    .login input[type="password"],
+    .login input[type="email"] {
+        font-size: 16px;
+        /* Prevents zoom on iOS */
+    }
+}
+
+/* API Monitoring Dashboard Styles */
+.api-monitoring-dashboard {
+    margin: 20px 0;
+}
+
+.api-monitoring-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.api-stat-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.api-stat-card {
+    background: #fff;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.api-stat-card h3 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: #666;
+}
+
+.stat-value {
+    font-size: 24px;
+    font-weight: bold;
+    color: #333;
+}
+
+.api-monitoring-tabs {
+    display: flex;
+    border-bottom: 1px solid #ddd;
+    margin-bottom: 20px;
+}
+
+.api-monitoring-tab {
+    padding: 10px 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+}
+
+.api-monitoring-tab.active {
+    border-bottom-color: #0073aa;
+    color: #0073aa;
+}
+
+.api-monitoring-panel {
+    display: none;
+}
+
+.api-monitoring-panel.active {
+    display: block;
+}
+
+.chart-container {
+    height: 400px;
+    margin-bottom: 30px;
+}
+
+.error-log-high {
+    background-color: #ffebee !important;
+}
+
+.error-log-medium {
+    background-color: #fff3e0 !important;
+}
+
+.refresh-button {
+    background: #0073aa;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.time-filter {
+    padding: 6px 10px;
+    margin-right: 10px;
+}
