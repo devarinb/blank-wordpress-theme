@@ -22,7 +22,6 @@ class Headless_API_Usage_Analytics
 
         add_action('rest_api_init', array($this, 'track_api_usage'));
         add_action('wp_ajax_get_api_analytics', array($this, 'get_api_analytics'));
-        add_action('wp_ajax_nopriv_get_api_analytics', array($this, 'get_api_analytics'));
         add_filter('rest_post_dispatch', array($this, 'log_request_end'), 10, 3);
     }
 
@@ -48,6 +47,8 @@ class Headless_API_Usage_Analytics
 
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
         dbDelta($sql);
+
+        $wpdb->query("DELETE FROM {$this->analytics_table} WHERE timestamp < DATE_SUB(NOW(), INTERVAL 90 DAY)");
     }
 
     public function track_api_usage()
@@ -77,35 +78,35 @@ class Headless_API_Usage_Analytics
                     'method' => $request->get_method(),
                     'response_time' => $response_time,
                     'status_code' => $response->get_status(),
-                    'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? '',
-                    'ip_address' => $_SERVER['REMOTE_ADDR'] ?? ''
+                    'user_agent' => isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field($_SERVER['HTTP_USER_AGENT']) : '',
+                    'ip_address' => isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field($_SERVER['REMOTE_ADDR']) : ''
                 )
             );
+            // Purge old analytics data
+            $wpdb->query("DELETE FROM {$this->analytics_table} WHERE timestamp < DATE_SUB(NOW(), INTERVAL 90 DAY)");
         }
         return $response;
     }
 
     public function get_api_analytics()
     {
-        if (!current_user_can('manage_options')) {
+        if (
+            !current_user_can('manage_options') ||
+            !isset($_POST['api_analytics_nonce']) ||
+            !wp_verify_nonce($_POST['api_analytics_nonce'], 'get_api_analytics')
+        ) {
             wp_die('Unauthorized');
         }
 
         global $wpdb;
 
-        $timeframe = isset($_GET['timeframe']) ? sanitize_text_field($_GET['timeframe']) : '30d';
+        $timeframe = isset($_POST['timeframe']) ? sanitize_key($_POST['timeframe']) : '30d';
 
-        switch ($timeframe) {
-            case '24h':
-                $interval = 'INTERVAL 24 HOUR';
-                break;
-            case '7d':
-                $interval = 'INTERVAL 7 DAY';
-                break;
-            case '30d':
-            default:
-                $interval = 'INTERVAL 30 DAY';
-                break;
+        $interval = 'INTERVAL 30 DAY';
+        if ($timeframe === '24h') {
+            $interval = 'INTERVAL 24 HOUR';
+        } elseif ($timeframe === '7d') {
+            $interval = 'INTERVAL 7 DAY';
         }
 
         $sql = "SELECT COUNT(*) FROM {$this->analytics_table} WHERE timestamp >= DATE_SUB(NOW(), {$interval})";
@@ -190,10 +191,12 @@ class Headless_API_Performance_Monitor
             $memory_usage = ($end_memory - $start_data['start_memory']) / 1024 / 1024;
             $peak_memory = memory_get_peak_usage() / 1024 / 1024;
 
-            $response->header('X-Response-Time', round($execution_time, 2) . 'ms');
-            $response->header('X-Memory-Usage', round($memory_usage, 2) . 'MB');
-            $response->header('X-Peak-Memory', round($peak_memory, 2) . 'MB');
-            $response->header('X-Query-Count', get_num_queries());
+            if (current_user_can('manage_options')) {
+                $response->header('X-Response-Time', round($execution_time, 2) . 'ms');
+                $response->header('X-Memory-Usage', round($memory_usage, 2) . 'MB');
+                $response->header('X-Peak-Memory', round($peak_memory, 2) . 'MB');
+                $response->header('X-Query-Count', get_num_queries());
+            }
 
             unset($this->performance_data[$request_id]);
         }
@@ -203,28 +206,25 @@ class Headless_API_Performance_Monitor
 
     public function get_performance_metrics()
     {
-        if (!current_user_can('manage_options')) {
+        if (
+            !current_user_can('manage_options') ||
+            !isset($_POST['performance_metrics_nonce']) ||
+            !wp_verify_nonce($_POST['performance_metrics_nonce'], 'get_performance_metrics')
+        ) {
             wp_die('Unauthorized');
         }
 
         global $wpdb;
 
-        $timeframe = isset($_GET['timeframe']) ? sanitize_text_field($_GET['timeframe']) : '30d';
+        $timeframe = isset($_POST['timeframe']) ? sanitize_text_field($_POST['timeframe']) : '30d';
 
-        switch ($timeframe) {
-            case '24h':
-                $interval = 'INTERVAL 24 HOUR';
-                $date_format = '%Y-%m-%d %H:00';
-                break;
-            case '7d':
-                $interval = 'INTERVAL 7 DAY';
-                $date_format = '%Y-%m-%d';
-                break;
-            case '30d':
-            default:
-                $interval = 'INTERVAL 30 DAY';
-                $date_format = '%Y-%m-%d';
-                break;
+        $interval = 'INTERVAL 30 DAY';
+        $date_format = '%Y-%m-%d';
+        if ($timeframe === '24h') {
+            $interval = 'INTERVAL 24 HOUR';
+            $date_format = '%Y-%m-%d %H:00';
+        } elseif ($timeframe === '7d') {
+            $interval = 'INTERVAL 7 DAY';
         }
 
         $daily_metrics = $wpdb->get_results(
@@ -299,6 +299,8 @@ class Headless_API_Error_Logger
 
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
         dbDelta($sql);
+
+        $wpdb->query("DELETE FROM {$this->error_log_table} WHERE timestamp < DATE_SUB(NOW(), INTERVAL 90 DAY)");
     }
 
     public function setup_error_logging()
@@ -322,37 +324,48 @@ class Headless_API_Error_Logger
                     'error_code' => $error_code,
                     'error_message' => $error_message,
                     'stack_trace' => wp_debug_backtrace_summary(),
-                    'request_data' => json_encode($request->get_params()),
+                    'request_data' => wp_json_encode($this->redact_sensitive_params($request->get_params())),
                     'user_id' => get_current_user_id(),
-                    'ip_address' => sanitize_text_field($_SERVER['REMOTE_ADDR'] ?? '')
+                    'ip_address' => isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field($_SERVER['REMOTE_ADDR']) : ''
                 )
             );
+            // Purge old error logs
+            $wpdb->query("DELETE FROM {$this->error_log_table} WHERE timestamp < DATE_SUB(NOW(), INTERVAL 90 DAY)");
         }
 
         return $response;
     }
 
+    private function redact_sensitive_params($params) {
+        $sensitive_keys = array('password', 'pass', 'pwd', 'api_key', 'token', 'secret');
+        foreach ($params as $k => $v) {
+            foreach ($sensitive_keys as $sk) {
+                if (stripos($k, $sk) !== false) {
+                    $params[$k] = 'REDACTED';
+                }
+            }
+        }
+        return $params;
+    }
     public function get_error_logs()
     {
-        if (!current_user_can('manage_options')) {
+        if (
+            !current_user_can('manage_options') ||
+            !isset($_POST['error_logs_nonce']) ||
+            !wp_verify_nonce($_POST['error_logs_nonce'], 'get_error_logs')
+        ) {
             wp_die('Unauthorized');
         }
 
         global $wpdb;
 
-        $timeframe = isset($_GET['timeframe']) ? sanitize_text_field($_GET['timeframe']) : '30d';
+        $timeframe = isset($_POST['timeframe']) ? sanitize_key($_POST['timeframe']) : '30d';
 
-        switch ($timeframe) {
-            case '24h':
-                $interval = 'INTERVAL 24 HOUR';
-                break;
-            case '7d':
-                $interval = 'INTERVAL 7 DAY';
-                break;
-            case '30d':
-            default:
-                $interval = 'INTERVAL 30 DAY';
-                break;
+        $interval = 'INTERVAL 30 DAY';
+        if ($timeframe === '24h') {
+            $interval = 'INTERVAL 24 HOUR';
+        } elseif ($timeframe === '7d') {
+            $interval = 'INTERVAL 7 DAY';
         }
 
         $sql = "SELECT * FROM {$this->error_log_table}
@@ -406,8 +419,8 @@ function content_overview_widget_display()
     echo '<a href="' . esc_url($url) . '" class="content-stat-item">';
     echo '<h4>Posts</h4>';
     echo '<div class="stat-numbers">';
-    echo '<span class="published">' . $post_counts->publish . ' Published</span>';
-    echo '<span class="draft">'     . $post_counts->draft   . ' Drafts</span>';
+    echo '<span class="published">' . esc_html($post_counts->publish) . ' Published</span>';
+    echo '<span class="draft">'     . esc_html($post_counts->draft)   . ' Drafts</span>';
     echo '</div>';
     echo '</a>';
 
@@ -415,8 +428,8 @@ function content_overview_widget_display()
     echo '<a href="' . esc_url($url) . '" class="content-stat-item">';
     echo '<h4>Pages</h4>';
     echo '<div class="stat-numbers">';
-    echo '<span class="published">' . $page_counts->publish . ' Published</span>';
-    echo '<span class="draft">'     . $page_counts->draft   . ' Drafts</span>';
+    echo '<span class="published">' . esc_html($page_counts->publish) . ' Published</span>';
+    echo '<span class="draft">'     . esc_html($page_counts->draft)   . ' Drafts</span>';
     echo '</div>';
     echo '</a>';
 
@@ -426,8 +439,8 @@ function content_overview_widget_display()
         echo '<a href="' . esc_url($url) . '" class="content-stat-item">';
         echo '<h4>' . esc_html($pt->labels->name) . '</h4>';
         echo '<div class="stat-numbers">';
-        echo '<span class="published">' . $counts->publish . ' Published</span>';
-        echo '<span class="draft">'     . $counts->draft   . ' Drafts</span>';
+        echo '<span class="published">' . esc_html($counts->publish) . ' Published</span>';
+        echo '<span class="draft">'     . esc_html($counts->draft)   . ' Drafts</span>';
         echo '</div>';
         echo '</a>';
     }
@@ -469,7 +482,7 @@ function recent_activity_widget_display()
         echo '<a href="' . esc_url($edit_link) .
             '" class="activity-item">';
         echo '<div class="activity-content">';
-        echo '<strong>' . get_the_title($post) . '</strong>';
+        echo '<strong>' . esc_html(get_the_title($post)) . '</strong>';
         echo '<span class="post-type-badge">' .
             esc_html(get_post_type_object($post->post_type)
                 ->labels->singular_name) .
@@ -482,7 +495,7 @@ function recent_activity_widget_display()
             '</span>';
         echo '<span class="status status-' .
             esc_attr($post->post_status) . '">' .
-            ucfirst($post->post_status) . '</span>';
+            esc_html(ucfirst($post->post_status)) . '</span>';
         echo '</div>';
         echo '</a>';
     }
@@ -533,9 +546,9 @@ function quick_actions_widget_display()
     $custom_post_types = get_post_types(array('public' => true, '_builtin' => false), 'objects');
     foreach ($custom_post_types as $post_type) {
         if (current_user_can('edit_posts')) {
-            echo '<a href="' . admin_url('post-new.php?post_type=' . $post_type->name) . '" class="quick-action-btn">';
+            echo '<a href="' . esc_url(admin_url('post-new.php?post_type=' . $post_type->name)) . '" class="quick-action-btn">';
             echo '<span class="dashicons dashicons-plus"></span>';
-            echo '<span>New ' . $post_type->labels->singular_name . '</span>';
+            echo '<span>New ' . esc_html($post_type->labels->singular_name) . '</span>';
             echo '</a>';
         }
     }
@@ -576,8 +589,8 @@ function system_status_widget_display()
     echo '<div class="status-item">';
     echo '<strong>Database Size:</strong> ';
 
-    $db_size = $wpdb->get_var("SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 1) AS 'DB Size in MB' FROM information_schema.tables WHERE table_schema='" . DB_NAME . "'");
-    echo $db_size . ' MB';
+    $db_size = $wpdb->get_var($wpdb->prepare("SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 1) AS db_size FROM information_schema.tables WHERE table_schema=%s", DB_NAME));
+    echo esc_html($db_size) . ' MB';
     echo '</div>';
 
     echo '<div class="status-item">';
@@ -611,17 +624,18 @@ $analytics_instance = null;
 $performance_instance = null;
 $error_logger_instance = null;
 
-function headless_api_monitor_init_tables()
-{
+function headless_api_monitor_init_tables() {
     global $analytics_instance, $performance_instance, $error_logger_instance;
-    $temp_analytics = new Headless_API_Usage_Analytics();
-    $temp_analytics->create_analytics_table();
-    $temp_error_logger = new Headless_API_Error_Logger();
-    $temp_error_logger->create_error_log_table();
     $analytics_instance = new Headless_API_Usage_Analytics();
     $performance_instance = new Headless_API_Performance_Monitor();
     $error_logger_instance = new Headless_API_Error_Logger();
 }
+register_activation_hook(__FILE__, function () {
+    $temp_analytics = new Headless_API_Usage_Analytics();
+    $temp_analytics->create_analytics_table();
+    $temp_error_logger = new Headless_API_Error_Logger();
+    $temp_error_logger->create_error_log_table();
+});
 add_action('init', 'headless_api_monitor_init_tables');
 
 function headless_add_api_monitoring_menu()
@@ -744,6 +758,9 @@ function headless_api_monitoring_page()
     </div>
 
     <script>
+        var apiAnalyticsNonce = '<?php echo wp_create_nonce("get_api_analytics"); ?>';
+        var performanceMetricsNonce = '<?php echo wp_create_nonce("get_performance_metrics"); ?>';
+        var errorLogsNonce = '<?php echo wp_create_nonce("get_error_logs"); ?>';
         jQuery(document).ready(function($) {
             $('.api-monitoring-tab').on('click', function() {
                 $('.api-monitoring-tab').removeClass('active');
@@ -757,13 +774,29 @@ function headless_api_monitoring_page()
             let endpointsChart, performanceChart, errorsChart;
             let endpointsTable, performanceTable, errorsTable;
 
+            function escapeHTML(str) {
+                return String(str).replace(/[&<>"'`=\/]/g, function (s) {
+                    return ({
+                        '&': '&',
+                        '<': '<',
+                        '>': '>',
+                        '"': '"',
+                        "'": ''",
+                        '`': '&#96;',
+                        '=': '&#61;',
+                        '/': '&#47;'
+                    })[s];
+                });
+            }
             function fetchData(timeframe = '30d') {
                 $('#stat-cards').html('<div class="api-stat-card"><h3>Loading...</h3></div>');
 
                 $.ajax({
+                    type: 'POST',
                     url: ajaxurl,
                     data: {
                         action: 'get_api_analytics',
+                        api_analytics_nonce: apiAnalyticsNonce,
                         timeframe: timeframe
                     },
                     success: function(response) {
@@ -781,9 +814,11 @@ function headless_api_monitoring_page()
                 });
 
                 $.ajax({
+                    type: 'POST',
                     url: ajaxurl,
                     data: {
                         action: 'get_performance_metrics',
+                        performance_metrics_nonce: performanceMetricsNonce,
                         timeframe: timeframe
                     },
                     success: function(response) {
@@ -799,9 +834,11 @@ function headless_api_monitoring_page()
                 });
 
                 $.ajax({
+                    type: 'POST',
                     url: ajaxurl,
                     data: {
                         action: 'get_error_logs',
+                        error_logs_nonce: errorLogsNonce,
                         timeframe: timeframe
                     },
                     success: function(response) {
@@ -891,10 +928,10 @@ function headless_api_monitoring_page()
                     }
 
                     const tableData = data.most_used_endpoints.map(item => [
-                        item.endpoint,
-                        item.usage_count,
-                        item.avg_response_time ? item.avg_response_time.toFixed(2) : '0',
-                        `${item.success_rate ? item.success_rate.toFixed(1) : '0'}%`
+                        escapeHTML(item.endpoint),
+                        escapeHTML(String(item.usage_count)),
+                        escapeHTML(item.avg_response_time ? item.avg_response_time.toFixed(2) : '0'),
+                        `${item.success_rate ? escapeHTML(item.success_rate.toFixed(1)) : '0'}%`
                     ]);
 
                     endpointsTable = $('#endpoints-table').DataTable({
@@ -957,11 +994,11 @@ function headless_api_monitoring_page()
                     }
 
                     const tableData = data.daily_metrics.map(item => [
-                        item.date,
-                        (parseFloat(item.avg_response_time) || 0).toFixed(2),
-                        (parseFloat(item.max_response_time) || 0).toFixed(2),
-                        (parseFloat(item.min_response_time) || 0).toFixed(2),
-                        item.total_requests
+                        escapeHTML(item.date),
+                        escapeHTML((parseFloat(item.avg_response_time) || 0).toFixed(2)),
+                        escapeHTML((parseFloat(item.max_response_time) || 0).toFixed(2)),
+                        escapeHTML((parseFloat(item.min_response_time) || 0).toFixed(2)),
+                        escapeHTML(String(item.total_requests))
                     ]);
 
                     performanceTable = $('#performance-table').DataTable({
@@ -1026,11 +1063,11 @@ function headless_api_monitoring_page()
                     }
 
                     const tableData = data.map(item => [
-                        new Date(item.timestamp).toLocaleString(),
-                        item.endpoint,
-                        item.error_code,
-                        item.error_message,
-                        item.ip_address
+                        escapeHTML(new Date(item.timestamp).toLocaleString()),
+                        escapeHTML(item.endpoint),
+                        escapeHTML(item.error_code),
+                        escapeHTML(item.error_message),
+                        escapeHTML(item.ip_address)
                     ]);
 
                     errorsTable = $('#errors-table').DataTable({
@@ -1117,6 +1154,7 @@ add_action('login_init', 'init_login_page_vars');
 function handle_login_form()
 {
     if (isset($_POST['wp-submit'])) {
+        check_admin_referer('login', 'login_nonce');
         $user = wp_signon();
         if (is_wp_error($user)) {
             $error = $user->get_error_message();
@@ -1149,6 +1187,9 @@ add_action('template_redirect', 'redirect_frontend');
 function custom_login_form()
 {
     add_filter('login_form_middle', function ($content) {
+        if (isset($_POST['wp-submit'])) {
+            wp_nonce_field('login', 'login_nonce');
+        }
         return $content . '<div class="login-divider"></div>';
     });
 }
