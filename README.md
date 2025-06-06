@@ -8,9 +8,10 @@ This is a blank WordPress theme specifically designed to be used in conjunction 
 - **REST API Enabled**: Ensures the WordPress REST API is fully functional for content consumption.
 - **Custom Login Page Styling**: Includes custom styling for the WordPress login page to match a modern aesthetic.
 - **Frontend Redirection**: Automatically redirects frontend requests to the WordPress admin area or login page, as the theme is not intended for public-facing display.
-- **API Usage Analytics**: Track API endpoint usage, request methods, response times, status codes, user agents, and IP addresses.
-- **Performance Monitoring**: Built-in performance metrics for API responses including response time, memory usage, peak memory, and database query counts.
-- **Error Logging**: Comprehensive error logging for API issues with detailed error tracking and debugging information.
+- **API Usage Analytics**: Tracks API endpoint usage, request methods, response times, status codes, user agents, and IP addresses, providing insights into API consumption patterns.
+- **Performance Monitoring**: Offers built-in performance metrics for API responses, including execution time, memory usage, peak memory consumption, and database query counts, accessible via custom HTTP headers for administrators.
+- **Error Logging**: Provides comprehensive error logging for API issues (4xx and 5xx status codes) with detailed error codes, messages, stack traces, redacted request data, user IDs, and IP addresses for efficient debugging and security analysis.
+- **Dashboard Customizations**: Enhances the WordPress admin dashboard with custom widgets for content overview, recent activity, quick actions, and system status, while removing default, less relevant widgets.
 
 ## Installation
 
@@ -53,10 +54,27 @@ Comprehensive error tracking includes:
 
 ### Login Page Customization
 
-The theme includes custom styles for the WordPress login page. These styles are defined in `style.css` and enqueued via `functions.php`.
+The theme includes custom styles for the WordPress login page and several functional customizations:
 
-- `functions.php`: Contains the `custom_login_stylesheet` function to enqueue the custom `style.css` for the login page and other login-related customizations (e.g., logo URL, error messages).
-- `style.css`: Provides the visual styling for the login form, inputs, buttons, and other elements.
+- **Custom Styling**: Styles are defined in `style.css` and enqueued via `functions.php` (`custom_login_stylesheet`).
+- **Custom Logo Link**: The login logo links to the site's home URL (`custom_login_logo_url`).
+- **Custom Logo Title**: The login logo title displays the blog name (`custom_login_logo_url_title`).
+- **Custom Form Labels**: Labels like "Username or Email Address" are changed to "Email Address", "Lost your password?" to "Forgot Password?", and "Remember Me" to "Keep me signed in" (`custom_login_form_labels`).
+- **Custom Error Message**: Generic error message for invalid login credentials (`custom_login_error_message`).
+- **Login Form Handling**: Includes nonce verification and proper redirection after login (`handle_login_form`, `custom_login_form`).
+
+### Dashboard Customizations
+
+The theme modifies the WordPress admin dashboard to provide a more focused and relevant experience:
+
+- **Removed Default Widgets**: Less relevant default dashboard widgets are removed (`remove_default_dashboard_widgets`).
+- **Content Overview Widget**: A custom widget displays counts of published and draft posts, pages, and custom post types (`add_content_overview_widget`).
+- **Recent Content Activity Widget**: Shows a list of recently modified posts and pages with author, time, and status details (`add_recent_activity_widget`).
+- **Quick Actions Widget**: Provides quick links to create new posts, pages, upload media, and access the API Monitoring dashboard (`add_quick_actions_widget`).
+- **Role-Based Customizations**:
+  - Editors see the "Content Overview" widget with high priority.
+  - Administrators get a "System Status" widget displaying database size, WordPress version, and PHP version (`customize_dashboard_by_role`, `system_status_widget_display`).
+- **Custom Dashboard Styling**: Enqueues `style.css` for custom dashboard aesthetics (`enqueue_custom_dashboard_styles`).
 
 ### Frontend Redirection
 

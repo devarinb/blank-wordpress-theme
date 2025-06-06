@@ -82,7 +82,6 @@ class Headless_API_Usage_Analytics
                     'ip_address' => isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field($_SERVER['REMOTE_ADDR']) : ''
                 )
             );
-            // Purge old analytics data
             $wpdb->query("DELETE FROM {$this->analytics_table} WHERE timestamp < DATE_SUB(NOW(), INTERVAL 90 DAY)");
         }
         return $response;
@@ -1154,7 +1153,7 @@ add_action('login_init', 'init_login_page_vars');
 function handle_login_form()
 {
     if (isset($_POST['wp-submit'])) {
-        check_admin_referer('login', 'login_nonce');
+        check_admin_referer('login', 'login_nonce', false); // Nonce check won't trigger “link expired” die
         $user = wp_signon();
         if (is_wp_error($user)) {
             $error = $user->get_error_message();
@@ -1186,11 +1185,9 @@ add_action('template_redirect', 'redirect_frontend');
 
 function custom_login_form()
 {
-    add_filter('login_form_middle', function ($content) {
-        if (isset($_POST['wp-submit'])) {
-            wp_nonce_field('login', 'login_nonce');
-        }
-        return $content . '<div class="login-divider"></div>';
+    add_action('login_form', function() {
+        wp_nonce_field('login', 'login_nonce');
+        echo '<div class="login-divider"></div>';
     });
 }
 add_action('login_init', 'custom_login_form');
