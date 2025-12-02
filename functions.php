@@ -7,13 +7,425 @@ function headless_theme_setup()
 {
     add_filter('rest_enabled', '__return_true');
     add_filter('rest_jsonp_enabled', '__return_true');
+    
+    // Add support for post thumbnails (featured images)
+    add_theme_support('post-thumbnails');
+    
+    // Optional: Set default post thumbnail size
+    set_post_thumbnail_size(1200, 630, true); // 1200x630 with hard crop - good for social media
+    
+    // Optional: Add additional image sizes for different use cases
+    add_image_size('thumbnail-small', 300, 200, true);
+    add_image_size('thumbnail-medium', 600, 400, true);
+    add_image_size('thumbnail-large', 1200, 800, true);
 }
 add_action('after_setup_theme', 'headless_theme_setup');
+
+// Canonical Headers Management Class
+class Headless_Canonical_Manager
+{
+    public function __construct()
+    {
+        add_action('admin_menu', array($this, 'add_settings_page'));
+        add_action('admin_init', array($this, 'register_settings'));
+        add_action('wp_head', array($this, 'add_canonical_headers'));
+        add_action('wp_head', array($this, 'add_robots_meta'), 1); // Run early
+        add_action('rest_api_init', array($this, 'add_api_canonical_headers'));
+        add_action('template_redirect', array($this, 'add_template_canonical_headers'));
+        add_action('do_robots', array($this, 'add_robots_txt_content'));
+        
+        // Handle wp-content requests - try multiple hooks to catch static files
+        add_action('init', array($this, 'handle_wp_content_canonical'), 1);
+        add_action('wp_loaded', array($this, 'handle_wp_content_canonical'), 1);
+        add_action('send_headers', array($this, 'handle_wp_content_canonical'), 1);
+        
+        // Create .htaccess rules for static files
+        add_action('admin_init', array($this, 'create_htaccess_rules'));
+        add_action('admin_init', array($this, 'handle_settings_actions'));
+        add_action('admin_notices', array($this, 'show_admin_notices'));
+        
+        // Add test endpoint for debugging canonical headers
+        add_action('init', array($this, 'add_canonical_test_endpoint'));
+    }
+
+    public function add_settings_page()
+    {
+        add_options_page(
+            'Canonical Headers Settings',
+            'Canonical Headers',
+            'manage_options',
+            'canonical-headers',
+            array($this, 'settings_page')
+        );
+    }
+
+    public function register_settings()
+    {
+        register_setting('canonical_headers_group', 'canonical_domain', array(
+            'sanitize_callback' => 'sanitize_url'
+        ));
+        register_setting('canonical_headers_group', 'canonical_enabled', array(
+            'sanitize_callback' => 'absint'
+        ));
+        register_setting('canonical_headers_group', 'exclude_wp_content', array(
+            'sanitize_callback' => 'absint'
+        ));
+    }
+
+    public function settings_page()
+    {
+        ?>
+        <div class="wrap">
+            <h1>Canonical Headers Settings</h1>
+            <form method="post" action="options.php">
+                <?php settings_fields('canonical_headers_group'); ?>
+                <?php do_settings_sections('canonical_headers_group'); ?>
+                
+                <table class="form-table">
+                    <tr>
+                        <th scope="row">Enable Canonical Headers</th>
+                        <td>
+                            <input type="checkbox" name="canonical_enabled" value="1" <?php checked(get_option('canonical_enabled', 0), 1); ?> />
+                            <p class="description">Enable canonical headers to prevent duplicate content indexing.</p>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <th scope="row">Main Site Domain</th>
+                        <td>
+                            <input type="url" name="canonical_domain" value="<?php echo esc_attr(get_option('canonical_domain', '')); ?>" class="regular-text" placeholder="https://example.com" />
+                            <p class="description">Enter your main site domain (e.g., https://example.com). This CMS domain will point to this as canonical.</p>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <th scope="row">Exclude wp-content from noindex</th>
+                        <td>
+                            <input type="checkbox" name="exclude_wp_content" value="1" <?php checked(get_option('exclude_wp_content', 1), 1); ?> />
+                            <p class="description">Don't add noindex meta tags to wp-content URLs (images, uploads, etc.) so they remain crawlable. Canonical headers will still be added to point to your main site.</p>
+                        </td>
+                    </tr>
+                </table>
+                
+                                 <?php submit_button(); ?>
+            </form>
+            
+            <?php if (get_option('canonical_enabled', 0) && get_option('canonical_domain', '')): ?>
+            <div class="card">
+                <h3>Static Files Configuration</h3>
+                <p>For static files (images, CSS, JS) to get canonical headers, we need to create .htaccess rules since they bypass WordPress.</p>
+                
+                <form method="post" action="">
+                    <?php wp_nonce_field('force_htaccess_creation', 'htaccess_nonce'); ?>
+                    <input type="hidden" name="action" value="create_htaccess" />
+                    <?php submit_button('Force Create/Update .htaccess Rules', 'secondary', 'create_htaccess', false); ?>
+                </form>
+                
+                <h4>Debug Information:</h4>
+                <?php $this->display_debug_info(); ?>
+            </div>
+            <?php endif; ?>
+            
+            <div class="notice notice-info">
+                <p><strong>How it works:</strong></p>
+                <ul>
+                    <li><strong>Canonical Headers:</strong> ALL pages, API endpoints, and wp-content resources will include canonical headers pointing to your main site</li>
+                    <li><strong>Static Files:</strong> .htaccess rules are created in wp-content/uploads/ to add canonical headers to images/files</li>
+                    <li><strong>Noindex Control:</strong> wp-content resources (images, uploads) can be excluded from noindex tags so they remain crawlable</li>
+                    <li><strong>SEO Benefits:</strong> Search engines will understand your main site is the canonical source while images remain accessible from this CMS</li>
+                    <li><strong>Best Practice:</strong> This prevents duplicate content penalties while maintaining functionality</li>
+                </ul>
+            </div>
+        </div>
+        <?php
+    }
+
+    public function add_canonical_headers()
+    {
+        if (!get_option('canonical_enabled', 0) || !get_option('canonical_domain', '')) {
+            return;
+        }
+
+        $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
+        $current_path = $_SERVER['REQUEST_URI'];
+        $canonical_url = $canonical_domain . $current_path;
+
+        echo '<link rel="canonical" href="' . esc_url($canonical_url) . '" />' . "\n";
+        header('Link: <' . $canonical_url . '>; rel="canonical"', false);
+    }
+
+    public function add_api_canonical_headers()
+    {
+        add_filter('rest_post_dispatch', array($this, 'add_rest_canonical_header'), 10, 3);
+    }
+
+    public function add_template_canonical_headers()
+    {
+        if (!get_option('canonical_enabled', 0) || !get_option('canonical_domain', '')) {
+            return;
+        }
+
+        $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
+        $current_path = $_SERVER['REQUEST_URI'];
+        $canonical_url = $canonical_domain . $current_path;
+
+        header('Link: <' . $canonical_url . '>; rel="canonical"', false);
+    }
+
+    public function add_rest_canonical_header($response, $server, $request)
+    {
+        if (!get_option('canonical_enabled', 0) || !get_option('canonical_domain', '')) {
+            return $response;
+        }
+
+        $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
+        $current_path = $_SERVER['REQUEST_URI'];
+        $canonical_url = $canonical_domain . $current_path;
+
+        $response->header('Link', '<' . $canonical_url . '>; rel="canonical"');
+        return $response;
+    }
+
+    private function is_wp_content_request()
+    {
+        return strpos($_SERVER['REQUEST_URI'], '/wp-content/') !== false;
+    }
+
+    public function add_robots_meta()
+    {
+        if (!get_option('canonical_enabled', 0)) {
+            return;
+        }
+
+        // Don't add noindex to wp-content resources (images, etc.) - we want them accessible
+        if (get_option('exclude_wp_content', 1) && $this->is_wp_content_request()) {
+            return;
+        }
+
+        // Add noindex, nofollow meta tag to prevent indexing of pages/admin
+        echo '<meta name="robots" content="noindex, nofollow" />' . "\n";
+    }
+
+    public function add_robots_txt_content()
+    {
+        if (!get_option('canonical_enabled', 0)) {
+            return;
+        }
+
+        // Block all crawlers from the site except wp-content
+        echo "User-agent: *\n";
+        echo "Disallow: /\n";
+        
+        if (get_option('exclude_wp_content', 1)) {
+            echo "Allow: /wp-content/\n";
+        }
+        
+        echo "\n";
+        
+        // Add canonical domain sitemap if configured
+        $canonical_domain = get_option('canonical_domain', '');
+        if ($canonical_domain) {
+            $canonical_domain = rtrim($canonical_domain, '/');
+            echo "Sitemap: {$canonical_domain}/sitemap.xml\n";
+        }
+    }
+
+    private $canonical_header_sent = false;
+
+    public function handle_wp_content_canonical()
+    {
+        if (!get_option('canonical_enabled', 0) || !get_option('canonical_domain', '')) {
+            return;
+        }
+
+        // Only process wp-content requests
+        if (!$this->is_wp_content_request()) {
+            return;
+        }
+
+        // Prevent duplicate headers
+        if ($this->canonical_header_sent) {
+            return;
+        }
+
+        $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
+        $current_path = $_SERVER['REQUEST_URI'];
+        $canonical_url = $canonical_domain . $current_path;
+
+        // Add canonical header for wp-content resources
+        if (!headers_sent()) {
+            header('Link: <' . $canonical_url . '>; rel="canonical"', false);
+            $this->canonical_header_sent = true;
+        }
+    }
+
+    public function create_htaccess_rules()
+    {
+        if (!get_option('canonical_enabled', 0) || !get_option('canonical_domain', '')) {
+            return;
+        }
+
+        $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
+        $upload_dir = wp_upload_dir();
+        $htaccess_file = $upload_dir['basedir'] . '/.htaccess';
+
+        // Only create/update if canonical domain is set
+        if (!$canonical_domain) {
+            return;
+        }
+
+        $htaccess_content = "# WordPress Canonical Headers for Static Files\n";
+        $htaccess_content .= "<IfModule mod_headers.c>\n";
+        $htaccess_content .= "    Header set Link \"<{$canonical_domain}%{REQUEST_URI}s>; rel=canonical\"\n";
+        $htaccess_content .= "</IfModule>\n\n";
+
+        // Create uploads .htaccess if it doesn't exist or update it
+        if (!file_exists($htaccess_file) || !$this->htaccess_has_canonical_rules($htaccess_file)) {
+            $existing_content = file_exists($htaccess_file) ? file_get_contents($htaccess_file) : '';
+            
+            // Remove any existing canonical rules first
+            $existing_content = preg_replace('/# WordPress Canonical Headers for Static Files.*?<\/IfModule>\s*\n*/s', '', $existing_content);
+            
+            $new_content = $htaccess_content . $existing_content;
+            file_put_contents($htaccess_file, $new_content);
+        }
+    }
+
+    private function htaccess_has_canonical_rules($htaccess_file)
+    {
+        if (!file_exists($htaccess_file)) {
+            return false;
+        }
+        
+        $content = file_get_contents($htaccess_file);
+        return strpos($content, 'WordPress Canonical Headers for Static Files') !== false;
+    }
+
+    public function handle_settings_actions()
+    {
+        if (isset($_POST['action']) && $_POST['action'] === 'create_htaccess') {
+            if (wp_verify_nonce($_POST['htaccess_nonce'], 'force_htaccess_creation')) {
+                $this->force_create_htaccess_rules();
+                add_action('admin_notices', function() {
+                    echo '<div class="notice notice-success is-dismissible"><p>.htaccess rules have been created/updated for static files.</p></div>';
+                });
+            }
+        }
+        
+        // Flush rewrite rules when canonical settings are updated
+        if (isset($_POST['canonical_enabled']) || isset($_POST['canonical_domain'])) {
+            flush_rewrite_rules();
+        }
+    }
+
+    public function show_admin_notices()
+    {
+        if (get_option('canonical_enabled', 0) && !get_option('canonical_domain', '')) {
+            echo '<div class="notice notice-warning"><p><strong>Canonical Headers:</strong> Please set your main site domain in the settings to enable canonical headers.</p></div>';
+        }
+    }
+
+    public function display_debug_info()
+    {
+        $canonical_domain = get_option('canonical_domain', '');
+        $upload_dir = wp_upload_dir();
+        $htaccess_file = $upload_dir['basedir'] . '/.htaccess';
+        
+        echo '<ul>';
+        echo '<li><strong>Canonical Domain:</strong> ' . esc_html($canonical_domain) . '</li>';
+        echo '<li><strong>Upload Directory:</strong> ' . esc_html($upload_dir['basedir']) . '</li>';
+        echo '<li><strong>.htaccess File:</strong> ' . esc_html($htaccess_file) . '</li>';
+        echo '<li><strong>.htaccess Exists:</strong> ' . (file_exists($htaccess_file) ? 'Yes' : 'No') . '</li>';
+        
+        if (file_exists($htaccess_file)) {
+            echo '<li><strong>Has Canonical Rules:</strong> ' . ($this->htaccess_has_canonical_rules($htaccess_file) ? 'Yes' : 'No') . '</li>';
+            echo '<li><strong>File Writable:</strong> ' . (is_writable($htaccess_file) ? 'Yes' : 'No') . '</li>';
+        } else {
+            echo '<li><strong>Directory Writable:</strong> ' . (is_writable($upload_dir['basedir']) ? 'Yes' : 'No') . '</li>';
+        }
+        
+        echo '<li><strong>Server Software:</strong> ' . esc_html($_SERVER['SERVER_SOFTWARE'] ?? 'Unknown') . '</li>';
+        echo '<li><strong>mod_headers Available:</strong> ' . (function_exists('apache_get_modules') && in_array('mod_headers', apache_get_modules()) ? 'Yes' : 'Unknown (may still work)') . '</li>';
+        
+        echo '</ul>';
+        
+        echo '<h4>Test Canonical Headers:</h4>';
+        echo '<p><a href="' . home_url('/canonical-test/') . '" target="_blank">Test Canonical Headers</a> - Opens in new tab to show headers</p>';
+        
+        if (file_exists($htaccess_file)) {
+            echo '<h4>.htaccess Content:</h4>';
+            echo '<textarea readonly style="width:100%;height:200px;font-family:monospace;">' . esc_textarea(file_get_contents($htaccess_file)) . '</textarea>';
+        }
+    }
+
+    public function force_create_htaccess_rules()
+    {
+        if (!get_option('canonical_enabled', 0) || !get_option('canonical_domain', '')) {
+            return false;
+        }
+
+        $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
+        $upload_dir = wp_upload_dir();
+        $htaccess_file = $upload_dir['basedir'] . '/.htaccess';
+
+        $htaccess_content = "# WordPress Canonical Headers for Static Files\n";
+        $htaccess_content .= "<IfModule mod_headers.c>\n";
+        $htaccess_content .= "    Header set Link \"<{$canonical_domain}%{REQUEST_URI}s>; rel=canonical\"\n";
+        $htaccess_content .= "</IfModule>\n\n";
+
+        $existing_content = file_exists($htaccess_file) ? file_get_contents($htaccess_file) : '';
+        
+        // Remove any existing canonical rules first
+        $existing_content = preg_replace('/# WordPress Canonical Headers for Static Files.*?<\/IfModule>\s*\n*/s', '', $existing_content);
+        
+        $new_content = $htaccess_content . $existing_content;
+        
+        return file_put_contents($htaccess_file, $new_content) !== false;
+    }
+
+    public function add_canonical_test_endpoint()
+    {
+        add_rewrite_rule('^canonical-test/?$', 'index.php?canonical_test=1', 'top');
+        add_filter('query_vars', function($vars) {
+            $vars[] = 'canonical_test';
+            return $vars;
+        });
+        
+        add_action('template_redirect', function() {
+            if (get_query_var('canonical_test')) {
+                header('Content-Type: text/plain');
+                echo "Canonical Headers Test\n";
+                echo "=====================\n\n";
+                echo "Request URI: " . $_SERVER['REQUEST_URI'] . "\n";
+                echo "Current Time: " . date('Y-m-d H:i:s') . "\n\n";
+                
+                if (get_option('canonical_enabled', 0) && get_option('canonical_domain', '')) {
+                    $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
+                    $canonical_url = $canonical_domain . $_SERVER['REQUEST_URI'];
+                    echo "Canonical URL: {$canonical_url}\n";
+                    echo "Header should be: Link: <{$canonical_url}>; rel=\"canonical\"\n\n";
+                    header('Link: <' . $canonical_url . '>; rel="canonical"', false);
+                    echo "✅ Canonical header added!\n";
+                } else {
+                    echo "❌ Canonical headers not enabled or domain not set\n";
+                }
+                
+                echo "\nAll Headers:\n";
+                foreach (headers_list() as $header) {
+                    echo "  {$header}\n";
+                }
+                
+                exit;
+            }
+        });
+    }
+}
 
 class Headless_API_Usage_Analytics
 {
     private $analytics_table = 'wp_api_analytics';
     private $request_start_times = [];
+    private $max_tracked_requests = 1000; // Prevent memory issues
 
     public function __construct()
     {
@@ -23,6 +435,9 @@ class Headless_API_Usage_Analytics
         add_action('rest_api_init', array($this, 'track_api_usage'));
         add_action('wp_ajax_get_api_analytics', array($this, 'get_api_analytics'));
         add_filter('rest_post_dispatch', array($this, 'log_request_end'), 10, 3);
+        
+        // Clean up tracking arrays periodically
+        add_action('wp_scheduled_delete', array($this, 'cleanup_tracking_arrays'));
     }
 
     public function create_analytics_table()
@@ -48,7 +463,16 @@ class Headless_API_Usage_Analytics
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
         dbDelta($sql);
 
+        // Clean up old records
         $wpdb->query("DELETE FROM {$this->analytics_table} WHERE timestamp < DATE_SUB(NOW(), INTERVAL 90 DAY)");
+    }
+
+    public function cleanup_tracking_arrays()
+    {
+        // Clear arrays if they get too large
+        if (count($this->request_start_times) > $this->max_tracked_requests) {
+            $this->request_start_times = [];
+        }
     }
 
     public function track_api_usage()
@@ -71,7 +495,7 @@ class Headless_API_Usage_Analytics
             unset($this->request_start_times[$request_id]);
 
             global $wpdb;
-            $wpdb->insert(
+            $result = $wpdb->insert(
                 $this->analytics_table,
                 array(
                     'endpoint' => $request->get_route(),
@@ -82,7 +506,11 @@ class Headless_API_Usage_Analytics
                     'ip_address' => isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field($_SERVER['REMOTE_ADDR']) : ''
                 )
             );
-            $wpdb->query("DELETE FROM {$this->analytics_table} WHERE timestamp < DATE_SUB(NOW(), INTERVAL 90 DAY)");
+            
+            // Only run cleanup occasionally to avoid performance impact
+            if ($result && mt_rand(1, 100) === 1) {
+                $wpdb->query("DELETE FROM {$this->analytics_table} WHERE timestamp < DATE_SUB(NOW(), INTERVAL 90 DAY)");
+            }
         }
         return $response;
     }
@@ -101,38 +529,45 @@ class Headless_API_Usage_Analytics
 
         $timeframe = isset($_POST['timeframe']) ? sanitize_key($_POST['timeframe']) : '30d';
 
-        $interval = 'INTERVAL 30 DAY';
-        if ($timeframe === '24h') {
-            $interval = 'INTERVAL 24 HOUR';
-        } elseif ($timeframe === '7d') {
-            $interval = 'INTERVAL 7 DAY';
-        }
+        $interval_map = array(
+            '24h' => 'INTERVAL 24 HOUR',
+            '7d' => 'INTERVAL 7 DAY',
+            '30d' => 'INTERVAL 30 DAY'
+        );
+        
+        $interval = isset($interval_map[$timeframe]) ? $interval_map[$timeframe] : 'INTERVAL 30 DAY';
 
-        $sql = "SELECT COUNT(*) FROM {$this->analytics_table} WHERE timestamp >= DATE_SUB(NOW(), {$interval})";
-        $total_requests = $wpdb->get_var($sql);
+        // Use prepared statements for better security
+        $total_requests = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->analytics_table} WHERE timestamp >= DATE_SUB(NOW(), {$interval})"
+        ));
 
-        $sql = "SELECT COUNT(DISTINCT endpoint) FROM {$this->analytics_table} WHERE timestamp >= DATE_SUB(NOW(), {$interval})";
-        $unique_endpoints = $wpdb->get_var($sql);
+        $unique_endpoints = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(DISTINCT endpoint) FROM {$this->analytics_table} WHERE timestamp >= DATE_SUB(NOW(), {$interval})"
+        ));
 
-        $sql = "SELECT AVG(response_time) FROM {$this->analytics_table} WHERE timestamp >= DATE_SUB(NOW(), {$interval})";
-        $avg_response_time = $wpdb->get_var($sql);
+        $avg_response_time = $wpdb->get_var($wpdb->prepare(
+            "SELECT AVG(response_time) FROM {$this->analytics_table} WHERE timestamp >= DATE_SUB(NOW(), {$interval})"
+        ));
 
-        $sql = "SELECT COUNT(*) FROM {$this->analytics_table} WHERE status_code < 400 AND timestamp >= DATE_SUB(NOW(), {$interval})";
-        $success_count = $wpdb->get_var($sql);
+        $success_count = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->analytics_table} WHERE status_code < 400 AND timestamp >= DATE_SUB(NOW(), {$interval})"
+        ));
 
         $success_rate = ($total_requests > 0) ? ($success_count / $total_requests * 100) : 0;
 
-        $sql = "SELECT
-                    endpoint,
-                    COUNT(*) as usage_count,
-                    AVG(response_time) as avg_response_time,
-                    SUM(CASE WHEN status_code < 400 THEN 1 ELSE 0 END) / COUNT(*) * 100 as success_rate
-                 FROM {$this->analytics_table}
-                 WHERE timestamp >= DATE_SUB(NOW(), {$interval})
-                 GROUP BY endpoint
-                 ORDER BY usage_count DESC
-                 LIMIT 10";
-        $most_used_endpoints = $wpdb->get_results($sql);
+        $most_used_endpoints = $wpdb->get_results($wpdb->prepare(
+            "SELECT
+                endpoint,
+                COUNT(*) as usage_count,
+                AVG(response_time) as avg_response_time,
+                SUM(CASE WHEN status_code < 400 THEN 1 ELSE 0 END) / COUNT(*) * 100 as success_rate
+             FROM {$this->analytics_table}
+             WHERE timestamp >= DATE_SUB(NOW(), {$interval})
+             GROUP BY endpoint
+             ORDER BY usage_count DESC
+             LIMIT 10"
+        ));
 
         $response = array(
             'total_requests' => (int)$total_requests,
@@ -150,6 +585,7 @@ class Headless_API_Performance_Monitor
 {
     private $analytics_table = 'wp_api_analytics';
     private $performance_data = [];
+    private $max_tracked_performance = 1000; // Prevent memory issues
 
     public function __construct()
     {
@@ -160,6 +596,17 @@ class Headless_API_Performance_Monitor
         add_action('wp_ajax_get_performance_metrics', array($this, 'get_performance_metrics'));
         add_filter('rest_pre_dispatch', array($this, 'start_performance_tracking'), 10, 3);
         add_filter('rest_post_dispatch', array($this, 'end_performance_tracking'), 10, 3);
+        
+        // Clean up tracking arrays periodically
+        add_action('wp_scheduled_delete', array($this, 'cleanup_performance_arrays'));
+    }
+
+    public function cleanup_performance_arrays()
+    {
+        // Clear arrays if they get too large
+        if (count($this->performance_data) > $this->max_tracked_performance) {
+            $this->performance_data = [];
+        }
     }
 
     public function add_performance_headers()
@@ -217,14 +664,15 @@ class Headless_API_Performance_Monitor
 
         $timeframe = isset($_POST['timeframe']) ? sanitize_text_field($_POST['timeframe']) : '30d';
 
-        $interval = 'INTERVAL 30 DAY';
-        $date_format = '%Y-%m-%d';
-        if ($timeframe === '24h') {
-            $interval = 'INTERVAL 24 HOUR';
-            $date_format = '%Y-%m-%d %H:00';
-        } elseif ($timeframe === '7d') {
-            $interval = 'INTERVAL 7 DAY';
-        }
+        $interval_map = array(
+            '24h' => array('INTERVAL 24 HOUR', '%Y-%m-%d %H:00'),
+            '7d' => array('INTERVAL 7 DAY', '%Y-%m-%d'),
+            '30d' => array('INTERVAL 30 DAY', '%Y-%m-%d')
+        );
+        
+        $config = isset($interval_map[$timeframe]) ? $interval_map[$timeframe] : $interval_map['30d'];
+        $interval = $config[0];
+        $date_format = $config[1];
 
         $daily_metrics = $wpdb->get_results(
             $wpdb->prepare(
@@ -243,14 +691,15 @@ class Headless_API_Performance_Monitor
             )
         );
 
-        $sql = "SELECT
-                    AVG(response_time) as avg_response_time,
-                    MIN(response_time) as min_response_time,
-                    MAX(response_time) as max_response_time,
-                    COUNT(*) as total_requests
-                 FROM {$this->analytics_table}
-                 WHERE timestamp >= DATE_SUB(NOW(), {$interval})";
-        $overall_metrics = $wpdb->get_row($sql);
+        $overall_metrics = $wpdb->get_row($wpdb->prepare(
+            "SELECT
+                AVG(response_time) as avg_response_time,
+                MIN(response_time) as min_response_time,
+                MAX(response_time) as max_response_time,
+                COUNT(*) as total_requests
+             FROM {$this->analytics_table}
+             WHERE timestamp >= DATE_SUB(NOW(), {$interval})"
+        ));
 
         $response = array(
             'daily_metrics' => $daily_metrics,
@@ -360,18 +809,20 @@ class Headless_API_Error_Logger
 
         $timeframe = isset($_POST['timeframe']) ? sanitize_key($_POST['timeframe']) : '30d';
 
-        $interval = 'INTERVAL 30 DAY';
-        if ($timeframe === '24h') {
-            $interval = 'INTERVAL 24 HOUR';
-        } elseif ($timeframe === '7d') {
-            $interval = 'INTERVAL 7 DAY';
-        }
+        $interval_map = array(
+            '24h' => 'INTERVAL 24 HOUR',
+            '7d' => 'INTERVAL 7 DAY',
+            '30d' => 'INTERVAL 30 DAY'
+        );
+        
+        $interval = isset($interval_map[$timeframe]) ? $interval_map[$timeframe] : 'INTERVAL 30 DAY';
 
-        $sql = "SELECT * FROM {$this->error_log_table}
-                 WHERE timestamp >= DATE_SUB(NOW(), {$interval})
-                 ORDER BY timestamp DESC
-                 LIMIT 100";
-        $recent_errors = $wpdb->get_results($sql);
+        $recent_errors = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM {$this->error_log_table}
+             WHERE timestamp >= DATE_SUB(NOW(), {$interval})
+             ORDER BY timestamp DESC
+             LIMIT 100"
+        ));
 
         wp_send_json_success($recent_errors);
     }
@@ -619,22 +1070,38 @@ function enqueue_custom_dashboard_styles($hook)
 add_action('admin_enqueue_scripts', 'enqueue_custom_dashboard_styles');
 
 
+// Global instances for better memory management
 $analytics_instance = null;
 $performance_instance = null;
 $error_logger_instance = null;
+$canonical_manager_instance = null;
 
 function headless_api_monitor_init_tables() {
-    global $analytics_instance, $performance_instance, $error_logger_instance;
-    $analytics_instance = new Headless_API_Usage_Analytics();
-    $performance_instance = new Headless_API_Performance_Monitor();
-    $error_logger_instance = new Headless_API_Error_Logger();
+    global $analytics_instance, $performance_instance, $error_logger_instance, $canonical_manager_instance;
+    
+    // Initialize only once
+    if (!$analytics_instance) {
+        $analytics_instance = new Headless_API_Usage_Analytics();
+    }
+    if (!$performance_instance) {
+        $performance_instance = new Headless_API_Performance_Monitor();
+    }
+    if (!$error_logger_instance) {
+        $error_logger_instance = new Headless_API_Error_Logger();
+    }
+    if (!$canonical_manager_instance) {
+        $canonical_manager_instance = new Headless_Canonical_Manager();
+    }
 }
+
+// Create tables on theme activation
 register_activation_hook(__FILE__, function () {
     $temp_analytics = new Headless_API_Usage_Analytics();
     $temp_analytics->create_analytics_table();
     $temp_error_logger = new Headless_API_Error_Logger();
     $temp_error_logger->create_error_log_table();
 });
+
 add_action('init', 'headless_api_monitor_init_tables');
 
 function headless_add_api_monitoring_menu()
@@ -789,6 +1256,9 @@ function headless_api_monitoring_page()
             }
             function fetchData(timeframe = '30d') {
                 $('#stat-cards').html('<div class="api-stat-card"><h3>Loading...</h3></div>');
+                
+                // Disable refresh button during loading
+                $('#refresh-data').prop('disabled', true).text('Loading...');
 
                 $.ajax({
                     type: 'POST',
@@ -798,17 +1268,28 @@ function headless_api_monitoring_page()
                         api_analytics_nonce: apiAnalyticsNonce,
                         timeframe: timeframe
                     },
+                    timeout: 30000, // 30 second timeout
                     success: function(response) {
-                        if (response.success) {
+                        if (response.success && response.data) {
                             renderAnalytics(response.data);
                         } else {
                             console.error('Error fetching analytics:', response.data);
-                            $('#stat-cards').html('<div class="api-stat-card"><h3>Error loading data.</h3></div>');
+                            $('#stat-cards').html('<div class="api-stat-card"><h3>No data available or error occurred.</h3></div>');
                         }
                     },
                     error: function(xhr, status, error) {
                         console.error('AJAX error for analytics:', status, error);
-                        $('#stat-cards').html('<div class="api-stat-card"><h3>Error loading data.</h3></div>');
+                        let errorMsg = 'Error loading data.';
+                        if (status === 'timeout') {
+                            errorMsg = 'Request timed out. Please try again.';
+                        } else if (status === 'parsererror') {
+                            errorMsg = 'Data parsing error. Please check server configuration.';
+                        }
+                        $('#stat-cards').html(`<div class="api-stat-card"><h3>${errorMsg}</h3></div>`);
+                    },
+                    complete: function() {
+                        // Re-enable refresh button
+                        $('#refresh-data').prop('disabled', false).text('Refresh Data');
                     }
                 });
 
@@ -820,8 +1301,9 @@ function headless_api_monitoring_page()
                         performance_metrics_nonce: performanceMetricsNonce,
                         timeframe: timeframe
                     },
+                    timeout: 30000,
                     success: function(response) {
-                        if (response.success) {
+                        if (response.success && response.data) {
                             renderPerformance(response.data);
                         } else {
                             console.error('Error fetching performance:', response.data);
@@ -840,8 +1322,9 @@ function headless_api_monitoring_page()
                         error_logs_nonce: errorLogsNonce,
                         timeframe: timeframe
                     },
+                    timeout: 30000,
                     success: function(response) {
-                        if (response.success) {
+                        if (response.success && response.data) {
                             renderErrors(response.data);
                         } else {
                             console.error('Error fetching errors:', response.data);
@@ -854,14 +1337,19 @@ function headless_api_monitoring_page()
             }
 
             function renderAnalytics(data) {
+                if (!data) {
+                    $('#stat-cards').html('<div class="api-stat-card"><h3>No data available</h3></div>');
+                    return;
+                }
+                
                 const statCards = `
                 <div class="api-stat-card">
                     <h3>Total API Requests</h3>
-                    <div class="stat-value">${data.total_requests.toLocaleString()}</div>
+                    <div class="stat-value">${(data.total_requests || 0).toLocaleString()}</div>
                 </div>
                 <div class="api-stat-card">
                     <h3>Unique Endpoints</h3>
-                    <div class="stat-value">${data.unique_endpoints}</div>
+                    <div class="stat-value">${data.unique_endpoints || 0}</div>
                 </div>
                 <div class="api-stat-card">
                     <h3>Avg. Response Time</h3>
@@ -869,7 +1357,7 @@ function headless_api_monitoring_page()
                 </div>
                 <div class="api-stat-card">
                     <h3>Success Rate</h3>
-                    <div class="stat-value">${data.success_rate.toFixed(1)}%</div>
+                    <div class="stat-value">${(data.success_rate || 0).toFixed(1)}%</div>
                 </div>
             `;
                 $('#stat-cards').html(statCards);
@@ -1153,7 +1641,7 @@ add_action('login_init', 'init_login_page_vars');
 function handle_login_form()
 {
     if (isset($_POST['wp-submit'])) {
-        check_admin_referer('login', 'login_nonce', false); // Nonce check won't trigger “link expired” die
+        check_admin_referer('login', 'login_nonce', false); 
         $user = wp_signon();
         if (is_wp_error($user)) {
             $error = $user->get_error_message();
