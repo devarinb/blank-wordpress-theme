@@ -1,0 +1,57 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on version tags like v3.0, v3.1, etc.
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create theme zip
+        run: |
+          # Create a temporary directory for the theme
+          mkdir -p blank-wordpress-theme
+          
+          # Copy theme files (excluding dev files)
+          cp -r inc blank-wordpress-theme/
+          cp functions.php blank-wordpress-theme/
+          cp index.php blank-wordpress-theme/
+          cp style.css blank-wordpress-theme/
+          cp screenshot.png blank-wordpress-theme/ 2>/dev/null || true
+          cp README.md blank-wordpress-theme/ 2>/dev/null || true
+          
+          # Create the zip file
+          zip -r blank-wordpress-theme.zip blank-wordpress-theme
+          
+          # Cleanup
+          rm -rf blank-wordpress-theme
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## WordPress Theme Release ${{ steps.get_version.outputs.VERSION }}
+            
+            ### Installation
+            1. Download `blank-wordpress-theme.zip`
+            2. Go to WordPress Admin → Appearance → Themes → Add New → Upload Theme
+            3. Upload the zip file and activate
+            
+            ### Changes
+            See [CHANGELOG](https://github.com/${{ github.repository }}/commits/${{ steps.get_version.outputs.VERSION }}) for details.
+          files: blank-wordpress-theme.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
