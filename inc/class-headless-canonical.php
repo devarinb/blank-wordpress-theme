@@ -20,8 +20,6 @@ class Headless_Canonical_Manager
         add_action('wp_loaded', array($this, 'handle_wp_content_canonical'), 1);
         add_action('send_headers', array($this, 'handle_wp_content_canonical'), 1);
         
-        // Create .htaccess rules for static files
-        add_action('admin_init', array($this, 'create_htaccess_rules'));
         add_action('admin_init', array($this, 'handle_settings_actions'));
         add_action('admin_notices', array($this, 'show_admin_notices'));
         
@@ -43,7 +41,7 @@ class Headless_Canonical_Manager
     public function register_settings()
     {
         register_setting('canonical_headers_group', 'canonical_domain', array(
-            'sanitize_callback' => 'sanitize_url'
+            'sanitize_callback' => 'esc_url_raw'
         ));
         register_setting('canonical_headers_group', 'canonical_enabled', array(
             'sanitize_callback' => 'absint'
@@ -128,11 +126,13 @@ class Headless_Canonical_Manager
         }
 
         $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
-        $current_path = $_SERVER['REQUEST_URI'];
+        $current_path = isset($_SERVER['REQUEST_URI']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'])) : '/';
         $canonical_url = $canonical_domain . $current_path;
 
         echo '<link rel="canonical" href="' . esc_url($canonical_url) . '" />' . "\n";
-        header('Link: <' . $canonical_url . '>; rel="canonical"', false);
+        if (!headers_sent()) {
+            header('Link: <' . $canonical_url . '>; rel="canonical"', false);
+        }
     }
 
     public function add_api_canonical_headers()
@@ -147,10 +147,12 @@ class Headless_Canonical_Manager
         }
 
         $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
-        $current_path = $_SERVER['REQUEST_URI'];
+        $current_path = isset($_SERVER['REQUEST_URI']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'])) : '/';
         $canonical_url = $canonical_domain . $current_path;
 
-        header('Link: <' . $canonical_url . '>; rel="canonical"', false);
+        if (!headers_sent()) {
+            header('Link: <' . $canonical_url . '>; rel="canonical"', false);
+        }
     }
 
     public function add_rest_canonical_header($response, $server, $request)
@@ -160,7 +162,7 @@ class Headless_Canonical_Manager
         }
 
         $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
-        $current_path = $_SERVER['REQUEST_URI'];
+        $current_path = isset($_SERVER['REQUEST_URI']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'])) : '/';
         $canonical_url = $canonical_domain . $current_path;
 
         $response->header('Link', '<' . $canonical_url . '>; rel="canonical"');
@@ -169,7 +171,9 @@ class Headless_Canonical_Manager
 
     private function is_wp_content_request()
     {
-        return strpos($_SERVER['REQUEST_URI'], '/wp-content/') !== false;
+        $request_uri = isset($_SERVER['REQUEST_URI']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'])) : '';
+
+        return strpos($request_uri, '/wp-content/') !== false;
     }
 
     public function add_robots_meta()
@@ -230,45 +234,13 @@ class Headless_Canonical_Manager
         }
 
         $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
-        $current_path = $_SERVER['REQUEST_URI'];
+        $current_path = isset($_SERVER['REQUEST_URI']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'])) : '/';
         $canonical_url = $canonical_domain . $current_path;
 
         // Add canonical header for wp-content resources
         if (!headers_sent()) {
             header('Link: <' . $canonical_url . '>; rel="canonical"', false);
             $this->canonical_header_sent = true;
-        }
-    }
-
-    public function create_htaccess_rules()
-    {
-        if (!get_option('canonical_enabled', 0) || !get_option('canonical_domain', '')) {
-            return;
-        }
-
-        $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
-        $upload_dir = wp_upload_dir();
-        $htaccess_file = $upload_dir['basedir'] . '/.htaccess';
-
-        // Only create/update if canonical domain is set
-        if (!$canonical_domain) {
-            return;
-        }
-
-        $htaccess_content = "# WordPress Canonical Headers for Static Files\n";
-        $htaccess_content .= "<IfModule mod_headers.c>\n";
-        $htaccess_content .= "    Header set Link \"<{$canonical_domain}%{REQUEST_URI}s>; rel=canonical\"\n";
-        $htaccess_content .= "</IfModule>\n\n";
-
-        // Create uploads .htaccess if it doesn't exist or update it
-        if (!file_exists($htaccess_file) || !$this->htaccess_has_canonical_rules($htaccess_file)) {
-            $existing_content = file_exists($htaccess_file) ? file_get_contents($htaccess_file) : '';
-            
-            // Remove any existing canonical rules first
-            $existing_content = preg_replace('/# WordPress Canonical Headers for Static Files.*?<\/IfModule>\s*\n*/s', '', $existing_content);
-            
-            $new_content = $htaccess_content . $existing_content;
-            file_put_contents($htaccess_file, $new_content);
         }
     }
 
@@ -284,13 +256,33 @@ class Headless_Canonical_Manager
 
     public function handle_settings_actions()
     {
-        if (isset($_POST['action']) && $_POST['action'] === 'create_htaccess') {
-            if (wp_verify_nonce($_POST['htaccess_nonce'], 'force_htaccess_creation')) {
-                $this->force_create_htaccess_rules();
+        $action = isset($_POST['action']) ? sanitize_key(wp_unslash($_POST['action'])) : '';
+
+        if (
+            $action === 'create_htaccess' &&
+            current_user_can('manage_options')
+        ) {
+            $nonce = isset($_POST['htaccess_nonce']) ? sanitize_text_field(wp_unslash($_POST['htaccess_nonce'])) : '';
+
+            if (!wp_verify_nonce($nonce, 'force_htaccess_creation')) {
                 add_action('admin_notices', function() {
-                    echo '<div class="notice notice-success is-dismissible"><p>.htaccess rules have been created/updated for static files.</p></div>';
+                    echo '<div class="notice notice-error is-dismissible"><p>Canonical .htaccess update failed because the security check did not pass.</p></div>';
                 });
+                return;
             }
+
+            $result = $this->force_create_htaccess_rules();
+
+            if (is_wp_error($result)) {
+                add_action('admin_notices', function() use ($result) {
+                    echo '<div class="notice notice-error is-dismissible"><p>' . esc_html($result->get_error_message()) . '</p></div>';
+                });
+                return;
+            }
+
+            add_action('admin_notices', function() {
+                echo '<div class="notice notice-success is-dismissible"><p>.htaccess rules have been created/updated for static files.</p></div>';
+            });
         }
         
         // Flush rewrite rules when canonical settings are updated
@@ -325,29 +317,47 @@ class Headless_Canonical_Manager
             echo '<li><strong>Directory Writable:</strong> ' . (is_writable($upload_dir['basedir']) ? 'Yes' : 'No') . '</li>';
         }
         
-        echo '<li><strong>Server Software:</strong> ' . esc_html($_SERVER['SERVER_SOFTWARE'] ?? 'Unknown') . '</li>';
-        echo '<li><strong>mod_headers Available:</strong> ' . (function_exists('apache_get_modules') && in_array('mod_headers', apache_get_modules()) ? 'Yes' : 'Unknown (may still work)') . '</li>';
+        $server_software = isset($_SERVER['SERVER_SOFTWARE']) ? sanitize_text_field(wp_unslash($_SERVER['SERVER_SOFTWARE'])) : 'Unknown';
+        echo '<li><strong>Server Software:</strong> ' . esc_html($server_software) . '</li>';
+        echo '<li><strong>mod_headers Available:</strong> ' . (function_exists('apache_get_modules') && in_array('mod_headers', apache_get_modules(), true) ? 'Yes' : 'Unknown (may still work)') . '</li>';
         
         echo '</ul>';
         
         echo '<h4>Test Canonical Headers:</h4>';
-        echo '<p><a href="' . home_url('/canonical-test/') . '" target="_blank">Test Canonical Headers</a> - Opens in new tab to show headers</p>';
+        echo '<p><a href="' . esc_url(home_url('/canonical-test/')) . '" target="_blank">Test Canonical Headers</a> - Opens in new tab to show headers</p>';
         
         if (file_exists($htaccess_file)) {
             echo '<h4>.htaccess Content:</h4>';
-            echo '<textarea readonly style="width:100%;height:200px;font-family:monospace;">' . esc_textarea(file_get_contents($htaccess_file)) . '</textarea>';
+            $htaccess_content = file_get_contents($htaccess_file);
+            echo '<textarea readonly style="width:100%;height:200px;font-family:monospace;">' . esc_textarea($htaccess_content !== false ? $htaccess_content : '') . '</textarea>';
         }
     }
 
     public function force_create_htaccess_rules()
     {
         if (!get_option('canonical_enabled', 0) || !get_option('canonical_domain', '')) {
-            return false;
+            return new WP_Error('canonical_not_configured', 'Canonical headers must be enabled and a canonical domain must be set before writing .htaccess rules.');
         }
 
         $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
         $upload_dir = wp_upload_dir();
         $htaccess_file = $upload_dir['basedir'] . '/.htaccess';
+
+        if (!empty($upload_dir['error'])) {
+            return new WP_Error('upload_dir_error', $upload_dir['error']);
+        }
+
+        if (!wp_mkdir_p($upload_dir['basedir'])) {
+            return new WP_Error('upload_dir_unavailable', 'The uploads directory could not be created or accessed.');
+        }
+
+        if (file_exists($htaccess_file) && !is_writable($htaccess_file)) {
+            return new WP_Error('htaccess_not_writable', 'The uploads .htaccess file is not writable.');
+        }
+
+        if (!file_exists($htaccess_file) && !is_writable($upload_dir['basedir'])) {
+            return new WP_Error('upload_dir_not_writable', 'The uploads directory is not writable.');
+        }
 
         $htaccess_content = "# WordPress Canonical Headers for Static Files\n";
         $htaccess_content .= "<IfModule mod_headers.c>\n";
@@ -355,13 +365,23 @@ class Headless_Canonical_Manager
         $htaccess_content .= "</IfModule>\n\n";
 
         $existing_content = file_exists($htaccess_file) ? file_get_contents($htaccess_file) : '';
+
+        if ($existing_content === false) {
+            return new WP_Error('htaccess_read_failed', 'The uploads .htaccess file could not be read.');
+        }
         
         // Remove any existing canonical rules first
         $existing_content = preg_replace('/# WordPress Canonical Headers for Static Files.*?<\/IfModule>\s*\n*/s', '', $existing_content);
         
         $new_content = $htaccess_content . $existing_content;
         
-        return file_put_contents($htaccess_file, $new_content) !== false;
+        $bytes_written = file_put_contents($htaccess_file, $new_content);
+
+        if ($bytes_written === false) {
+            return new WP_Error('htaccess_write_failed', 'The uploads .htaccess file could not be written.');
+        }
+
+        return true;
     }
 
     public function add_canonical_test_endpoint()
@@ -377,12 +397,13 @@ class Headless_Canonical_Manager
                 header('Content-Type: text/plain');
                 echo "Canonical Headers Test\n";
                 echo "=====================\n\n";
-                echo "Request URI: " . $_SERVER['REQUEST_URI'] . "\n";
-                echo "Current Time: " . date('Y-m-d H:i:s') . "\n\n";
+                $request_uri = isset($_SERVER['REQUEST_URI']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'])) : '/';
+                echo "Request URI: " . $request_uri . "\n";
+                echo "Current Time: " . gmdate('Y-m-d H:i:s') . "\n\n";
                 
                 if (get_option('canonical_enabled', 0) && get_option('canonical_domain', '')) {
                     $canonical_domain = rtrim(get_option('canonical_domain', ''), '/');
-                    $canonical_url = $canonical_domain . $_SERVER['REQUEST_URI'];
+                    $canonical_url = $canonical_domain . $request_uri;
                     echo "Canonical URL: {$canonical_url}\n";
                     echo "Header should be: Link: <{$canonical_url}>; rel=\"canonical\"\n\n";
                     header('Link: <' . $canonical_url . '>; rel="canonical"', false);

@@ -17,6 +17,10 @@ class Headless_Security_Manager
 
     public function add_security_headers()
     {
+        if (headers_sent()) {
+            return;
+        }
+
         header('X-Content-Type-Options: nosniff');
         
         // Skip X-Frame-Options for admin pages to allow WordPress 6.9+ iframe-based block editor
@@ -31,6 +35,10 @@ class Headless_Security_Manager
 
     public function remove_x_pingback($headers)
     {
+        if (!is_array($headers)) {
+            return $headers;
+        }
+
         unset($headers['X-Pingback']);
         return $headers;
     }
