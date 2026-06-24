@@ -16,23 +16,25 @@ class Headless_Cleanup_Manager
 
     public function redirect_frontend()
     {
+        $request_uri = isset($_SERVER['REQUEST_URI']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'])) : '';
+
         if (
-            strpos($_SERVER['REQUEST_URI'], '/wp-json/') !== false ||
+            strpos($request_uri, '/wp-json/') !== false ||
             is_admin() ||
-            strpos($_SERVER['REQUEST_URI'], 'wp-login.php') !== false ||
-            strpos($_SERVER['REQUEST_URI'], '/wp-content/') !== false
+            strpos($request_uri, 'wp-login.php') !== false ||
+            strpos($request_uri, '/wp-content/') !== false
         ) {
             return;
         }
         
         // If user is logged in, redirect to admin
         if (is_user_logged_in()) {
-            wp_redirect(admin_url());
+            wp_safe_redirect(admin_url());
             exit;
         }
         
         // Otherwise redirect to login
-        wp_redirect(wp_login_url());
+        wp_safe_redirect(wp_login_url());
         exit;
     }
 

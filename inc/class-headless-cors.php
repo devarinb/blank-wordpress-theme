@@ -16,25 +16,35 @@ class Headless_CORS_Manager
     public function handle_cors()
     {
         $allowed_origin = get_option('headless_allowed_origin', '*');
+        $origin = isset($_SERVER['HTTP_ORIGIN']) ? esc_url_raw(wp_unslash($_SERVER['HTTP_ORIGIN'])) : '';
         
-        // If we are in a development environment or specific origin is set
         if ($allowed_origin === '*') {
-             header("Access-Control-Allow-Origin: *");
+            $allowed_origin_header = '*';
+        } elseif ($origin === $allowed_origin) {
+            $allowed_origin_header = $allowed_origin;
         } else {
-            $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
-            if ($origin === $allowed_origin) {
-                header("Access-Control-Allow-Origin: " . $allowed_origin);
-            }
+            $allowed_origin_header = '';
         }
 
-        header("Access-Control-Allow-Methods: POST, GET, OPTIONS, PUT, DELETE");
-        header("Access-Control-Allow-Credentials: true");
-        header("Access-Control-Allow-Headers: Authorization, Content-Type, X-Requested-With, X-WP-Nonce");
+        if (!headers_sent()) {
+            if ($allowed_origin_header) {
+                header('Access-Control-Allow-Origin: ' . $allowed_origin_header);
+            }
+
+            header('Access-Control-Allow-Methods: POST, GET, OPTIONS, PUT, DELETE');
+            header('Access-Control-Allow-Headers: Authorization, Content-Type, X-Requested-With, X-WP-Nonce');
+
+            if ($allowed_origin_header && $allowed_origin_header !== '*') {
+                header('Access-Control-Allow-Credentials: true');
+            }
+        }
     }
 
     public function handle_preflight($value, $result, $request, $server)
     {
-        if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+        $request_method = isset($_SERVER['REQUEST_METHOD']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_METHOD'])) : '';
+
+        if ($request_method === 'OPTIONS') {
             return true;
         }
         return $value;
@@ -53,7 +63,20 @@ class Headless_CORS_Manager
 
     public function register_settings()
     {
-        register_setting('headless_settings_group', 'headless_allowed_origin');
+        register_setting('headless_settings_group', 'headless_allowed_origin', array(
+            'sanitize_callback' => array($this, 'sanitize_allowed_origin'),
+        ));
+    }
+
+    public function sanitize_allowed_origin($origin)
+    {
+        $origin = is_string($origin) ? trim($origin) : '';
+
+        if ($origin === '*') {
+            return '*';
+        }
+
+        return esc_url_raw($origin);
     }
 
     public function settings_page()

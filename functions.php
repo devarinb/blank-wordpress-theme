@@ -30,10 +30,8 @@ add_action('after_setup_theme', 'headless_theme_setup');
 require_once get_template_directory() . '/inc/class-headless-cors.php';
 require_once get_template_directory() . '/inc/class-headless-security.php';
 require_once get_template_directory() . '/inc/class-headless-cleanup.php';
-require_once get_template_directory() . '/inc/class-headless-analytics.php';
 require_once get_template_directory() . '/inc/class-headless-canonical.php';
 require_once get_template_directory() . '/inc/class-headless-dashboard.php';
-require_once get_template_directory() . '/inc/class-headless-login.php';
 
 /**
  * Initialize Classes
@@ -42,32 +40,7 @@ function headless_theme_init() {
     new Headless_CORS_Manager();
     new Headless_Security_Manager();
     new Headless_Cleanup_Manager();
-    new Headless_API_Usage_Analytics();
-    new Headless_API_Performance_Monitor();
-    new Headless_API_Error_Logger();
     new Headless_Canonical_Manager();
     new Headless_Dashboard_Manager();
-    new Headless_Login_Manager();
 }
 add_action('init', 'headless_theme_init');
-
-// Create tables on theme activation
-// Create tables on theme switch
-add_action('after_switch_theme', function () {
-    $temp_analytics = new Headless_API_Usage_Analytics();
-    $temp_analytics->create_analytics_table();
-    $temp_error_logger = new Headless_API_Error_Logger();
-    $temp_error_logger->create_error_log_table();
-    update_option('headless_tables_created', 1);
-});
-
-// Ensure tables exist (fallback for existing installs)
-add_action('admin_init', function() {
-    if (!get_option('headless_tables_created')) {
-        $temp_analytics = new Headless_API_Usage_Analytics();
-        $temp_analytics->create_analytics_table();
-        $temp_error_logger = new Headless_API_Error_Logger();
-        $temp_error_logger->create_error_log_table();
-        update_option('headless_tables_created', 1);
-    }
-});
